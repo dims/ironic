@@ -1202,14 +1202,12 @@ class ConductorManager(periodic_task.PeriodicTasks):
         node_iter = self.iter_nodes(
             fields=['id', 'reservation'],
             filters={'provision_state': states.DEPLOYING,
-                     'maintenance': False})
+                     'maintenance': False,
+                     'reserved_by_any_of': offline_conductors})
         if not node_iter:
             return
 
         for node_uuid, driver, node_id, conductor_hostname in node_iter:
-            if conductor_hostname not in offline_conductors:
-                continue
-
             # NOTE(lucasagomes): Although very rare, this may lead to a
             # race condition. By the time we release the lock the conductor
             # that was previously managing the node could be back online.
@@ -1644,6 +1642,8 @@ class ConductorManager(periodic_task.PeriodicTasks):
                                           node_uuid,
                                           shared=True,
                                           purpose=lock_purpose) as task:
+                    if not getattr(task.driver, 'management', None):
+                        continue
                     task.driver.management.validate(task)
                     sensors_data = task.driver.management.get_sensors_data(
                         task)
