@@ -258,11 +258,11 @@ def _build_pxe_config_options(task, pxe_info):
     """
     node = task.node
     is_whole_disk_image = node.driver_internal_info.get('is_whole_disk_image')
-    if is_whole_disk_image:
-        # These are dummy values to satisfy elilo.
-        # image and initrd fields in elilo config cannot be blank.
-        kernel = 'no_kernel'
-        ramdisk = 'no_ramdisk'
+
+    # These are dummy values to satisfy elilo.
+    # image and initrd fields in elilo config cannot be blank.
+    kernel = 'no_kernel'
+    ramdisk = 'no_ramdisk'
 
     if CONF.pxe.ipxe_enabled:
         deploy_kernel = '/'.join([CONF.deploy.http_url, node.uuid,
@@ -278,8 +278,15 @@ def _build_pxe_config_options(task, pxe_info):
         deploy_kernel = pxe_info['deploy_kernel'][1]
         deploy_ramdisk = pxe_info['deploy_ramdisk'][1]
         if not is_whole_disk_image:
-            kernel = pxe_info['kernel'][1]
-            ramdisk = pxe_info['ramdisk'][1]
+            # It is possible that we don't have kernel/ramdisk or even
+            # image_source to determine if it's a whole disk image or not.
+            # For example, when transitioning to 'available' state for first
+            # time from 'manage' state. Retain dummy values if we don't have
+            # kernel/ramdisk.
+            if 'kernel' in pxe_info:
+                kernel = pxe_info['kernel'][1]
+            if 'ramdisk' in pxe_info:
+                ramdisk = pxe_info['ramdisk'][1]
 
     pxe_options = {
         'deployment_aki_path': deploy_kernel,
@@ -473,8 +480,7 @@ class PXEBoot(base.BootInterface):
             bootfile_path = os.path.join(
                 CONF.deploy.http_root,
                 os.path.basename(CONF.pxe.ipxe_boot_script))
-            if not os.path.exists(bootfile_path):
-                shutil.copyfile(CONF.pxe.ipxe_boot_script, bootfile_path)
+            shutil.copyfile(CONF.pxe.ipxe_boot_script, bootfile_path)
 
         dhcp_opts = pxe_utils.dhcp_options_for_instance(task)
         provider = dhcp_factory.DHCPFactory()
@@ -574,13 +580,20 @@ class PXEBoot(base.BootInterface):
                     pxe_config_path, root_uuid_or_disk_id,
                     deploy_utils.get_boot_mode_for_deploy(node),
                     iwdi, deploy_utils.is_trusted_boot_requested(node))
-
+                # In case boot mode changes from bios to uefi, boot device
+                # order may get lost in some platforms. Better to re-apply
+                # boot device.
+                deploy_utils.try_set_boot_device(task, boot_devices.PXE)
         else:
             # If it's going to boot from the local disk, we don't need
             # PXE config files. They still need to be generated as part
             # of the prepare() because the deployment does PXE boot the
             # deploy ramdisk
             pxe_utils.clean_up_pxe_config(task)
+
+            # In case boot mode changes from bios to uefi, boot device order
+            # may get lost in some platforms. Better to re-apply boot device.
+            deploy_utils.try_set_boot_device(task, boot_devices.DISK)
 
     def clean_up_instance(self, task):
         """Cleans up the boot of instance.
