@@ -47,6 +47,16 @@ _DRIVER_PROPERTIES = {}
 # versions, the API service should be restarted.
 _VENDOR_METHODS = {}
 
+# RAID (logical disk) configuration information for drivers:
+#   key = driver name;
+#   value = dictionary of RAID configuration information of that driver:
+#             key = property name.
+#             value = description of the property
+# NOTE(rloo). This is cached for the lifetime of the API service. If one or
+# more conductor services are restarted with new driver versions, the API
+# service should be restarted.
+_RAID_PROPERTIES = {}
+
 
 class Driver(base.APIBase):
     """API representation of a driver."""
@@ -60,6 +70,9 @@ class Driver(base.APIBase):
     links = wsme.wsattr([link.Link], readonly=True)
     """A list containing self and bookmark links"""
 
+    properties = wsme.wsattr([link.Link], readonly=True)
+    """A list containing links to driver properties"""
+
     @staticmethod
     def convert_with_links(name, hosts):
         driver = Driver()
@@ -67,13 +80,23 @@ class Driver(base.APIBase):
         driver.hosts = hosts
         driver.links = [
             link.Link.make_link('self',
-                                pecan.request.host_url,
+                                pecan.request.public_url,
                                 'drivers', name),
             link.Link.make_link('bookmark',
-                                pecan.request.host_url,
+                                pecan.request.public_url,
                                 'drivers', name,
                                 bookmark=True)
         ]
+        if api_utils.allow_links_node_states_and_driver_properties():
+            driver.properties = [
+                link.Link.make_link('self',
+                                    pecan.request.public_url,
+                                    'drivers', name + "/properties"),
+                link.Link.make_link('bookmark',
+                                    pecan.request.public_url,
+                                    'drivers', name + "/properties",
+                                    bookmark=True)
+            ]
         return driver
 
     @classmethod
@@ -171,15 +194,20 @@ class DriverRaidController(rest.RestController):
         """
         if not api_utils.allow_raid_config():
             raise exception.NotAcceptable()
-        topic = pecan.request.rpcapi.get_topic_for_driver(driver_name)
-        try:
-            return pecan.request.rpcapi.get_raid_logical_disk_properties(
-                pecan.request.context, driver_name, topic=topic)
-        except exception.UnsupportedDriverExtension as e:
-            # Change error code as 404 seems appropriate because RAID is a
-            # standard interface and all drivers might not have it.
-            e.code = http_client.NOT_FOUND
-            raise
+
+        if driver_name not in _RAID_PROPERTIES:
+            topic = pecan.request.rpcapi.get_topic_for_driver(driver_name)
+            try:
+                info = pecan.request.rpcapi.get_raid_logical_disk_properties(
+                    pecan.request.context, driver_name, topic=topic)
+            except exception.UnsupportedDriverExtension as e:
+                # Change error code as 404 seems appropriate because RAID is a
+                # standard interface and all drivers might not have it.
+                e.code = http_client.NOT_FOUND
+                raise
+
+            _RAID_PROPERTIES[driver_name] = info
+        return _RAID_PROPERTIES[driver_name]
 
 
 class DriversController(rest.RestController):

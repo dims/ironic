@@ -67,7 +67,13 @@ MIN_VERB_VERSIONS = {
     ir_states.VERBS['provide']: versions.MINOR_4_MANAGEABLE_STATE,
 
     ir_states.VERBS['inspect']: versions.MINOR_6_INSPECT_STATE,
+    ir_states.VERBS['abort']: versions.MINOR_13_ABORT_VERB,
 }
+
+# States where calling do_provisioning_action makes sense
+PROVISION_ACTION_STATES = (ir_states.VERBS['manage'],
+                           ir_states.VERBS['provide'],
+                           ir_states.VERBS['abort'])
 
 
 def hide_fields_in_newer_versions(obj):
@@ -351,7 +357,7 @@ class NodeStatesController(rest.RestController):
 
         :param node_ident: the UUID or logical name of a node.
         :param target_raid_config: Desired target RAID configuration of
-            the node
+            the node. It may be an empty dictionary as well.
         :raises: UnsupportedDriverExtension, if the node's driver doesn't
             support RAID configuration.
         :raises: InvalidParameterValue, if validation of target raid config
@@ -425,7 +431,7 @@ class NodeStatesController(rest.RestController):
         of the requested action.
 
         :param node_ident: UUID or logical name of a node.
-        :param target: The desired provision state of the node.
+        :param target: The desired provision state of the node or verb.
         :param configdrive: Optional. A gzipped and base64 encoded
             configdrive. Only valid when setting provision state
             to "active".
@@ -487,8 +493,7 @@ class NodeStatesController(rest.RestController):
         elif target == ir_states.VERBS['inspect']:
             pecan.request.rpcapi.inspect_hardware(
                 pecan.request.context, rpc_node.uuid, topic=topic)
-        elif target in (
-                ir_states.VERBS['manage'], ir_states.VERBS['provide']):
+        elif target in PROVISION_ACTION_STATES:
             pecan.request.rpcapi.do_provisioning_action(
                 pecan.request.context, rpc_node.uuid, target, topic)
         else:
@@ -620,6 +625,9 @@ class Node(base.APIBase):
     ports = wsme.wsattr([link.Link], readonly=True)
     """Links to the collection of ports on this node"""
 
+    states = wsme.wsattr([link.Link], readonly=True)
+    """Links to endpoint for retrieving and setting node states"""
+
     # NOTE(deva): "conductor_affinity" shouldn't be presented on the
     #             API because it's an internal value. Don't add it here.
 
@@ -643,7 +651,8 @@ class Node(base.APIBase):
         setattr(self, 'chassis_uuid', kwargs.get('chassis_id', wtypes.Unset))
 
     @staticmethod
-    def _convert_with_links(node, url, fields=None, show_password=True):
+    def _convert_with_links(node, url, fields=None, show_password=True,
+                            show_states_links=True):
         # NOTE(lucasagomes): Since we are able to return a specified set of
         # fields the "uuid" can be unset, so we need to save it in another
         # variable to use when building the links
@@ -657,6 +666,12 @@ class Node(base.APIBase):
                                               node_uuid + "/ports",
                                               bookmark=True)
                           ]
+            if show_states_links:
+                node.states = [link.Link.make_link('self', url, 'nodes',
+                                                   node_uuid + "/states"),
+                               link.Link.make_link('bookmark', url, 'nodes',
+                                                   node_uuid + "/states",
+                                                   bookmark=True)]
 
         if not show_password and node.driver_info != wtypes.Unset:
             node.driver_info = ast.literal_eval(strutils.mask_password(
@@ -684,9 +699,12 @@ class Node(base.APIBase):
         assert_juno_provision_state_name(node)
         hide_fields_in_newer_versions(node)
         show_password = pecan.request.context.show_password
-        return cls._convert_with_links(node, pecan.request.host_url,
+        show_states_links = (
+            api_utils.allow_links_node_states_and_driver_properties())
+        return cls._convert_with_links(node, pecan.request.public_url,
                                        fields=fields,
-                                       show_password=show_password)
+                                       show_password=show_password,
+                                       show_states_links=show_states_links)
 
     @classmethod
     def sample(cls, expand=True):

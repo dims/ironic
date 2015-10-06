@@ -54,10 +54,12 @@ pxe_opts = [
                       'configuration for UEFI boot loader.')),
     cfg.StrOpt('tftp_server',
                default='$my_ip',
-               help=_('IP address of ironic-conductor node\'s TFTP server.')),
+               help=_("IP address of ironic-conductor node's TFTP server.")),
     cfg.StrOpt('tftp_root',
                default='/tftpboot',
-               help=_('ironic-conductor node\'s TFTP root path.')),
+               help=_("ironic-conductor node's TFTP root path. The "
+                      "ironic-conductor must have read/write access to this "
+                      "path.")),
     cfg.StrOpt('tftp_master_path',
                default='/tftpboot/master_images',
                help=_('On ironic-conductor node, directory where master TFTP '
@@ -196,7 +198,7 @@ def _get_instance_image_info(node, ctx):
 
     :param node: a node object
     :param ctx: context
-    :returns: a dictionary whose key are the name of the image (kernel,
+    :returns: a dictionary whose keys are the names of the images (kernel,
         ramdisk) and values are the absolute paths of them. If it's a whole
         disk image, it returns an empty dictionary.
     """
@@ -232,7 +234,7 @@ def _get_deploy_image_info(node):
     deploy ramdisk.
 
     :param node: a node object
-    :returns: a dictionary whose key are the name of the image (
+    :returns: a dictionary whose keys are the names of the images (
         deploy_kernel, deploy_ramdisk) and values are the absolute
         paths of them.
     :raises: MissingParameterValue, if deploy_kernel/deploy_ramdisk is
