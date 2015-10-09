@@ -11,8 +11,8 @@ psycopg2>=2.5
 python-ironicclient>=0.8.0
 python-subunit>=0.0.18
 testtools>=1.4.0
-os-testr>=0.4.1
 
+-e git+https://github.com/openstack/os-testr.git#egg=os-testr
 -e git+https://github.com/openstack/oslotest.git#egg=oslotest
 -e git+https://github.com/openstack/oslosphinx.git#egg=oslosphinx
 
