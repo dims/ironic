@@ -31,7 +31,7 @@ from ironic.common import image_service
 from ironic.common import images
 from ironic.common import utils
 from ironic.drivers.modules import image_cache
-from ironic.tests.unit import base
+from ironic.tests import base
 
 
 def touch(filename):
@@ -469,7 +469,7 @@ class TestImageCacheCleanUp(base.TestCase):
                           'uuid', 'fake', 'fake')
         self.assertTrue(mock_rmtree.called)
 
-    @mock.patch.object(image_cache.LOG, 'warn', autospec=True)
+    @mock.patch.object(image_cache.LOG, 'warning', autospec=True)
     @mock.patch.object(image_cache.ImageCache, '_clean_up_too_old',
                        autospec=True)
     @mock.patch.object(image_cache.ImageCache, '_clean_up_ensure_cache_size',

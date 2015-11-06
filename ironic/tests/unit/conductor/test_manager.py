@@ -44,8 +44,8 @@ from ironic.drivers import base as drivers_base
 from ironic.drivers.modules import fake
 from ironic import objects
 from ironic.objects import base as obj_base
-from ironic.tests.unit import base as tests_base
-from ironic.tests.unit.conductor import utils as mgr_utils
+from ironic.tests import base as tests_base
+from ironic.tests.unit.conductor import mgr_utils
 from ironic.tests.unit.db import base as tests_db_base
 from ironic.tests.unit.db import utils
 from ironic.tests.unit.objects import utils as obj_utils
@@ -3830,7 +3830,6 @@ class ManagerSyncLocalStateTestCase(_CommonMixIn, tests_db_base.DbTestCase):
         self._assert_get_nodeinfo_args(get_nodeinfo_mock)
         mapped_mock.assert_called_once_with(self.node.uuid, self.node.driver)
         self.assertFalse(acquire_mock.called)
-        self.service.ring_manager.reset.assert_called_once_with()
 
     def test_already_mapped(self, get_nodeinfo_mock, mapped_mock,
                             acquire_mock):
@@ -3846,7 +3845,6 @@ class ManagerSyncLocalStateTestCase(_CommonMixIn, tests_db_base.DbTestCase):
         self._assert_get_nodeinfo_args(get_nodeinfo_mock)
         mapped_mock.assert_called_once_with(self.node.uuid, self.node.driver)
         self.assertFalse(acquire_mock.called)
-        self.service.ring_manager.reset.assert_called_once_with()
 
     def test_good(self, get_nodeinfo_mock, mapped_mock, acquire_mock):
         get_nodeinfo_mock.return_value = self._get_nodeinfo_list_response()

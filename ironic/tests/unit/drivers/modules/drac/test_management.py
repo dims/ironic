@@ -28,7 +28,7 @@ from ironic.drivers.modules.drac import client as drac_client
 from ironic.drivers.modules.drac import common as drac_common
 from ironic.drivers.modules.drac import management as drac_mgmt
 from ironic.drivers.modules.drac import resource_uris
-from ironic.tests.unit.conductor import utils as mgr_utils
+from ironic.tests.unit.conductor import mgr_utils
 from ironic.tests.unit.db import base as db_base
 from ironic.tests.unit.db import utils as db_utils
 from ironic.tests.unit.drivers.modules.drac import utils as test_utils
@@ -149,6 +149,27 @@ class DracManagementInternalMethodsTestCase(db_base.DbTestCase):
         result = drac_mgmt.create_config_job(self.node)
 
         self.assertIsNone(result)
+        mock_pywsman.invoke.assert_called_once_with(
+            mock.ANY, resource_uris.DCIM_BIOSService,
+            'CreateTargetedConfigJob', None)
+
+    def test_create_config_job_with_reboot(self, mock_client_pywsman):
+        result_xml = test_utils.build_soap_xml(
+            [{'ReturnValue': drac_client.RET_CREATED}],
+            resource_uris.DCIM_BIOSService)
+        mock_xml = test_utils.mock_wsman_root(result_xml)
+        mock_pywsman = mock_client_pywsman.Client.return_value
+        mock_pywsman.invoke.return_value = mock_xml
+
+        mock_pywsman_clientopts = (
+            mock_client_pywsman.ClientOptions.return_value)
+
+        result = drac_mgmt.create_config_job(self.node, reboot=True)
+
+        self.assertIsNone(result)
+        mock_pywsman_clientopts.add_property.assert_has_calls([
+            mock.call('RebootJobType', '3'),
+        ])
         mock_pywsman.invoke.assert_called_once_with(
             mock.ANY, resource_uris.DCIM_BIOSService,
             'CreateTargetedConfigJob', None)

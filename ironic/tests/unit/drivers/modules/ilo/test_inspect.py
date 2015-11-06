@@ -28,7 +28,7 @@ from ironic.db import api as dbapi
 from ironic.drivers.modules.ilo import common as ilo_common
 from ironic.drivers.modules.ilo import inspect as ilo_inspect
 from ironic.drivers.modules.ilo import power as ilo_power
-from ironic.tests.unit.conductor import utils as mgr_utils
+from ironic.tests.unit.conductor import mgr_utils
 from ironic.tests.unit.db import base as db_base
 from ironic.tests.unit.db import utils as db_utils
 from ironic.tests.unit.objects import utils as obj_utils
@@ -243,7 +243,8 @@ class TestInspectPrivateMethods(db_base.DbTestCase):
         db_obj.create_port.assert_any_call(port_dict1)
         db_obj.create_port.assert_any_call(port_dict2)
 
-    @mock.patch.object(ilo_inspect.LOG, 'warn', spec_set=True, autospec=True)
+    @mock.patch.object(ilo_inspect.LOG, 'warning',
+                       spec_set=True, autospec=True)
     @mock.patch.object(dbapi, 'get_instance', spec_set=True, autospec=True)
     def test__create_ports_if_not_exist_mac_exception(self,
                                                       instance_mock,

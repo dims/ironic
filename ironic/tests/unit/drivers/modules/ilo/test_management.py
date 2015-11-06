@@ -24,7 +24,7 @@ from ironic.conductor import task_manager
 from ironic.drivers.modules.ilo import common as ilo_common
 from ironic.drivers.modules.ilo import management as ilo_management
 from ironic.drivers.modules import ipmitool
-from ironic.tests.unit.conductor import utils as mgr_utils
+from ironic.tests.unit.conductor import mgr_utils
 from ironic.tests.unit.db import base as db_base
 from ironic.tests.unit.db import utils as db_utils
 from ironic.tests.unit.objects import utils as obj_utils
@@ -220,7 +220,7 @@ class IloManagementTestCase(db_base.DbTestCase):
         ilo_management._execute_ilo_clean_step(
             self.node, 'fake-step', 'args', kwarg='kwarg')
         clean_step_mock.assert_called_once_with('args', kwarg='kwarg')
-        self.assertTrue(log_mock.warn.called)
+        self.assertTrue(log_mock.warning.called)
 
     @mock.patch.object(ilo_common, 'get_ilo_object', spec_set=True,
                        autospec=True)
