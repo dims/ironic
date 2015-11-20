@@ -97,7 +97,8 @@ CONF.register_opts(deploy_opts, group='deploy')
 
 LOG = logging.getLogger(__name__)
 
-VALID_ROOT_DEVICE_HINTS = set(('size', 'model', 'wwn', 'serial', 'vendor'))
+VALID_ROOT_DEVICE_HINTS = set(('size', 'model', 'wwn', 'serial', 'vendor',
+                               'wwn_with_extension', 'wwn_vendor_extension'))
 
 SUPPORTED_CAPABILITIES = {
     'boot_option': ('local', 'netboot'),
@@ -1139,7 +1140,7 @@ def parse_root_device_hints(node):
                 _('Root device hint "size" is not an integer value.'))
 
     hints = []
-    for key, value in root_device.items():
+    for key, value in sorted(root_device.items()):
         # NOTE(lucasagomes): We can't have spaces in the PXE config
         # file, so we are going to url/percent encode the value here
         # and decode on the other end.

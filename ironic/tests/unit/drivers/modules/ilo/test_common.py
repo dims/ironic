@@ -90,6 +90,15 @@ class IloValidateParametersTestCase(db_base.DbTestCase):
         self.node.driver_info['client_port'] = 'qwe'
         self.assertRaises(exception.InvalidParameterValue,
                           ilo_common.parse_driver_info, self.node)
+        self.node.driver_info['client_port'] = '65536'
+        self.assertRaises(exception.InvalidParameterValue,
+                          ilo_common.parse_driver_info, self.node)
+        self.node.driver_info['console_port'] = 'invalid'
+        self.assertRaises(exception.InvalidParameterValue,
+                          ilo_common.parse_driver_info, self.node)
+        self.node.driver_info['console_port'] = '-1'
+        self.assertRaises(exception.InvalidParameterValue,
+                          ilo_common.parse_driver_info, self.node)
 
     def test_parse_driver_info_missing_multiple_params(self):
         del self.node.driver_info['ilo_password']
@@ -103,13 +112,11 @@ class IloValidateParametersTestCase(db_base.DbTestCase):
 
     def test_parse_driver_info_invalid_multiple_params(self):
         self.node.driver_info['client_timeout'] = 'qwe'
-        self.node.driver_info['console_port'] = 'not-int'
         try:
             ilo_common.parse_driver_info(self.node)
             self.fail("parse_driver_info did not throw exception.")
         except exception.InvalidParameterValue as e:
             self.assertIn('client_timeout', str(e))
-            self.assertIn('console_port', str(e))
 
 
 class IloCommonMethodsTestCase(db_base.DbTestCase):
@@ -746,9 +753,9 @@ class IloCommonMethodsTestCase(db_base.DbTestCase):
                        autospec=True)
     @mock.patch.object(ilo_common, 'set_secure_boot_mode', spec_set=True,
                        autospec=True)
-    def test__update_secure_boot_mode_passed_true(self,
-                                                  func_set_secure_boot_mode,
-                                                  func_is_secure_boot_req):
+    def test_update_secure_boot_mode_passed_true(self,
+                                                 func_set_secure_boot_mode,
+                                                 func_is_secure_boot_req):
         with task_manager.acquire(self.context, self.node.uuid,
                                   shared=False) as task:
             func_is_secure_boot_req.return_value = True
@@ -759,9 +766,9 @@ class IloCommonMethodsTestCase(db_base.DbTestCase):
                        autospec=True)
     @mock.patch.object(ilo_common, 'set_secure_boot_mode', spec_set=True,
                        autospec=True)
-    def test__update_secure_boot_mode_passed_false(self,
-                                                   func_set_secure_boot_mode,
-                                                   func_is_secure_boot_req):
+    def test_update_secure_boot_mode_passed_false(self,
+                                                  func_set_secure_boot_mode,
+                                                  func_is_secure_boot_req):
         with task_manager.acquire(self.context, self.node.uuid,
                                   shared=False) as task:
             func_is_secure_boot_req.return_value = False

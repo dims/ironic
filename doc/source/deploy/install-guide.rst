@@ -1830,8 +1830,10 @@ The list of support hints is:
 * model (STRING): device identifier
 * vendor (STRING): device vendor
 * serial (STRING): disk serial number
-* wwn (STRING): unique storage identifier
 * size (INT): size of the device in GiB
+* wwn (STRING): unique storage identifier
+* wwn_with_extension (STRING): unique storage identifier with the vendor extension appended
+* wwn_vendor_extension (STRING): unique vendor storage identifier
 
 To associate one or more hints with a node, update the node's properties
 with a ``root_device`` key, for example::
@@ -2174,7 +2176,7 @@ CoreOS tools
         sudo systemctl start docker
 
     Ubuntu:
-        sudo service docker.io start
+        sudo service docker start
 
 #. Create the image::
 
