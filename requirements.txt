@@ -19,7 +19,18 @@ pytz>=2013.6
 stevedore>=1.5.0 # Apache-2.0
 pysendfile>=2.0.0
 websockify>=0.6.1
-
+oslo.concurrency>=2.3.0 # Apache-2.0
+oslo.config>=2.6.0 # Apache-2.0
+oslo.context>=0.2.0 # Apache-2.0
+oslo.db>=3.0.0 # Apache-2.0
+oslo.rootwrap>=2.0.0 # Apache-2.0
+oslo.i18n>=1.5.0 # Apache-2.0
+oslo.log>=1.12.0 # Apache-2.0
+oslo.middleware>=2.9.0 # Apache-2.0
+oslo.policy>=0.5.0 # Apache-2.0
+oslo.serialization>=1.10.0 # Apache-2.0
+oslo.service>=0.12.0 # Apache-2.0
+oslo.utils!=2.6.0,>=2.4.0 # Apache-2.0
 pecan>=1.0.0
 requests!=2.8.0,>=2.5.2
 six>=1.9.0
@@ -27,22 +38,7 @@ jsonpatch>=1.1
 WSME>=0.8
 Jinja2>=2.8 # BSD License (3 clause)
 keystonemiddleware!=2.4.0,>=2.0.0
-
+oslo.messaging!=2.8.0,>2.6.1 # Apache-2.0
 retrying!=1.3.0,>=1.2.3 # Apache-2.0
+oslo.versionedobjects>=0.9.0
 jsonschema!=2.5.0,<3.0.0,>=2.0.0
-
--e git+https://github.com/openstack/oslo.config.git#egg=oslo.config
--e git+https://github.com/openstack/oslo.concurrency.git#egg=oslo.concurrency
--e git+https://github.com/openstack/oslo.context.git#egg=oslo.context
--e git+https://github.com/openstack/oslo.db.git#egg=oslo.db
--e git+https://github.com/openstack/oslo.i18n.git#egg=oslo.i18n
--e git+https://github.com/openstack/oslo.log.git#egg=oslo.log
--e git+https://github.com/openstack/oslo.messaging.git#egg=oslo.messaging
--e git+https://github.com/openstack/oslo.middleware.git#egg=oslo.middleware
--e git+https://github.com/openstack/oslo.policy.git#egg=oslo.policy
--e git+https://github.com/openstack/oslo.reports.git#egg=oslo.reports
--e git+https://github.com/openstack/oslo.rootwrap.git#egg=oslo.rootwrap
--e git+https://github.com/openstack/oslo.serialization.git#egg=oslo.serialization
--e git+https://github.com/openstack/oslo.service.git#egg=oslo.service
--e git+https://github.com/openstack/oslo.utils.git#egg=oslo.utils
--e git+https://github.com/openstack/oslo.versionedobjects.git#egg=oslo.versionedobjects
