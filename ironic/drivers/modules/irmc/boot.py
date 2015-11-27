@@ -13,7 +13,7 @@
 # under the License.
 
 """
-iRMC Deploy Driver
+iRMC Boot Driver
 """
 
 import os
@@ -30,18 +30,14 @@ from ironic.common.glance_service import service_utils
 from ironic.common.i18n import _
 from ironic.common.i18n import _LE
 from ironic.common.i18n import _LI
-from ironic.common.i18n import _LW
 from ironic.common import images
 from ironic.common import states
 from ironic.common import utils
-from ironic.conductor import task_manager
 from ironic.conductor import utils as manager_utils
 from ironic.drivers import base
-from ironic.drivers.modules import agent
-from ironic.drivers.modules import agent_base_vendor
 from ironic.drivers.modules import deploy_utils
 from ironic.drivers.modules.irmc import common as irmc_common
-from ironic.drivers.modules import iscsi_deploy
+
 
 scci = importutils.try_import('scciclient.irmc.scci')
 
@@ -56,22 +52,22 @@ except Exception:
 opts = [
     cfg.StrOpt('remote_image_share_root',
                default='/remote_image_share_root',
-               help='Ironic conductor node\'s "NFS" or "CIFS" root path'),
+               help=_('Ironic conductor node\'s "NFS" or "CIFS" root path')),
     cfg.StrOpt('remote_image_server',
-               help='IP of remote image server'),
+               help=_('IP of remote image server')),
     cfg.StrOpt('remote_image_share_type',
                default='CIFS',
-               help='Share type of virtual media, either "NFS" or "CIFS"'),
+               help=_('Share type of virtual media, either "NFS" or "CIFS"')),
     cfg.StrOpt('remote_image_share_name',
                default='share',
-               help='share name of remote_image_server'),
+               help=_('share name of remote_image_server')),
     cfg.StrOpt('remote_image_user_name',
-               help='User name of remote_image_server'),
+               help=_('User name of remote_image_server')),
     cfg.StrOpt('remote_image_user_password', secret=True,
-               help='Password of remote_image_user_name'),
+               help=_('Password of remote_image_user_name')),
     cfg.StrOpt('remote_image_user_domain',
                default='',
-               help='Domain name of remote_image_user_name'),
+               help=_('Domain name of remote_image_user_name')),
 ]
 
 CONF.register_opts(opts, group='irmc')
@@ -84,9 +80,6 @@ REQUIRED_PROPERTIES = {
 }
 
 COMMON_PROPERTIES = REQUIRED_PROPERTIES
-
-CONF.import_opt('pxe_append_params', 'ironic.drivers.modules.iscsi_deploy',
-                group='pxe')
 
 SUPPORTED_SHARE_TYPES = ('nfs', 'cifs')
 
@@ -197,18 +190,18 @@ def _parse_deploy_info(node):
         value.
     """
     deploy_info = {}
-    deploy_info.update(iscsi_deploy.parse_instance_info(node))
+    deploy_info.update(deploy_utils.get_image_instance_info(node))
     deploy_info.update(_parse_driver_info(node))
     deploy_info.update(_parse_instance_info(node))
 
     return deploy_info
 
 
-def _reboot_into_deploy_iso(task, ramdisk_options):
-    """Reboots the node into a given deploy ISO.
+def _setup_deploy_iso(task, ramdisk_options):
+    """Attaches virtual media and sets it as boot device.
 
     This method attaches the given deploy ISO as virtual media, prepares the
-    arguments for ramdisk in virtual media floppy, and then reboots the node.
+    arguments for ramdisk in virtual media floppy.
 
     :param task: a TaskManager instance containing the node to act on.
     :param ramdisk_options: the options to be passed to the ramdisk in virtual
@@ -231,9 +224,8 @@ def _reboot_into_deploy_iso(task, ramdisk_options):
             CONF.irmc.remote_image_share_root, deploy_iso_file)
         images.fetch(task.context, deploy_iso_href, deploy_iso_fullpathname)
 
-    setup_vmedia_for_boot(task, deploy_iso_file, ramdisk_options)
+    _setup_vmedia_for_boot(task, deploy_iso_file, ramdisk_options)
     manager_utils.node_set_boot_device(task, boot_devices.CDROM)
-    manager_utils.node_power_action(task, states.REBOOT)
 
 
 def _get_deploy_iso_name(node):
@@ -353,7 +345,29 @@ def _prepare_floppy_image(task, params):
     return floppy_filename
 
 
-def setup_vmedia_for_boot(task, bootable_iso_filename, parameters=None):
+def attach_boot_iso_if_needed(task):
+    """Attaches boot ISO for a deployed node if it exists.
+
+    This method checks the instance info of the bare metal node for a
+    boot ISO. If the instance info has a value of key 'irmc_boot_iso',
+    it indicates that 'boot_option' is 'netboot'. Threfore it attaches
+    the boot ISO on the bare metal node and then sets the node to boot from
+    virtual media cdrom.
+
+    :param task: a TaskManager instance containing the node to act on.
+    :raises: IRMCOperationError if attaching virtual media failed.
+    :raises: InvalidParameterValue if the validation of the
+        ManagementInterface fails.
+    """
+    d_info = task.node.driver_internal_info
+    node_state = task.node.provision_state
+
+    if 'irmc_boot_iso' in d_info and node_state == states.ACTIVE:
+        _setup_vmedia_for_boot(task, d_info['irmc_boot_iso'])
+        manager_utils.node_set_boot_device(task, boot_devices.CDROM)
+
+
+def _setup_vmedia_for_boot(task, bootable_iso_filename, parameters=None):
     """Sets up the node to boot from the boot ISO image.
 
     This method attaches a boot_iso on the node and passes
@@ -384,7 +398,7 @@ def _cleanup_vmedia_boot(task):
     """Cleans a node after a virtual media boot.
 
     This method cleans up a node after a virtual media boot.
-    It deletes a floppy image if it exists in NFS/CIFS server.
+    It deletes floppy and cdrom images if they exist in NFS/CIFS server.
     It also ejects both the virtual media cdrom and the virtual media floppy.
 
     :param task: a TaskManager instance containing the node to act on.
@@ -401,7 +415,7 @@ def _cleanup_vmedia_boot(task):
 
 
 def _remove_share_file(share_filename):
-    """remove a file in the share file system.
+    """Remove given file from the share file system.
 
     :param share_filename: a file name to be removed.
     """
@@ -435,7 +449,7 @@ def _attach_virtual_cd(node, bootable_iso_filename):
 
     except scci.SCCIClientError as irmc_exception:
         LOG.exception(_LE("Error while inserting virtual cdrom "
-                          "from node %(uuid)s. Error: %(error)s"),
+                          "into node %(uuid)s. Error: %(error)s"),
                       {'uuid': node.uuid, 'error': irmc_exception})
         operation = _("Inserting virtual cdrom")
         raise exception.IRMCOperationError(operation=operation,
@@ -491,7 +505,7 @@ def _attach_virtual_fd(node, floppy_image_filename):
 
     except scci.SCCIClientError as irmc_exception:
         LOG.exception(_LE("Error while inserting virtual floppy "
-                          "from node %(uuid)s. Error: %(error)s"),
+                          "into node %(uuid)s. Error: %(error)s"),
                       {'uuid': node.uuid, 'error': irmc_exception})
         operation = _("Inserting virtual floppy")
         raise exception.IRMCOperationError(operation=operation,
@@ -502,10 +516,10 @@ def _attach_virtual_fd(node, floppy_image_filename):
 
 
 def _detach_virtual_fd(node):
-    """Detaches virtual media on the node.
+    """Detaches virtual media floppy on the node.
 
     :param node: an ironic node object.
-    :raises: IRMCOperationError if eject virtual media failed.
+    :raises: IRMCOperationError if eject virtual media floppy failed.
     """
     try:
         irmc_client = irmc_common.get_irmc_client(node)
@@ -524,7 +538,7 @@ def _detach_virtual_fd(node):
                  " for node %s"), node.uuid)
 
 
-def _check_share_fs_mounted():
+def check_share_fs_mounted():
     """Check if Share File System (NFS or CIFS) is mounted.
 
     :raises: InvalidParameterValue, if config option has invalid value.
@@ -537,18 +551,18 @@ def _check_share_fs_mounted():
             share=CONF.irmc.remote_image_share_root)
 
 
-class IRMCVirtualMediaIscsiDeploy(base.DeployInterface):
+class IRMCVirtualMediaBoot(base.BootInterface):
     """Interface for iSCSI deploy-related actions."""
 
     def __init__(self):
-        """Constructor of IRMCVirtualMediaIscsiDeploy.
+        """Constructor of IRMCVirtualMediaBoot.
 
         :raises: IRMCSharedFileSystemNotMounted, if shared file system is
             not mounted.
         :raises: InvalidParameterValue, if config option has invalid value.
         """
-        _check_share_fs_mounted()
-        super(IRMCVirtualMediaIscsiDeploy, self).__init__()
+        check_share_fs_mounted()
+        super(IRMCVirtualMediaBoot, self).__init__()
 
     def get_properties(self):
         return COMMON_PROPERTIES
@@ -565,8 +579,7 @@ class IRMCVirtualMediaIscsiDeploy(base.DeployInterface):
             missing in the Glance image, or if 'kernel' and 'ramdisk' are
             missing in the Non Glance image.
         """
-        _check_share_fs_mounted()
-        iscsi_deploy.validate(task)
+        check_share_fs_mounted()
 
         d_info = _parse_deploy_info(task.node)
         if task.node.driver_internal_info.get('is_whole_disk_image'):
@@ -577,352 +590,84 @@ class IRMCVirtualMediaIscsiDeploy(base.DeployInterface):
             props = ['kernel', 'ramdisk']
         deploy_utils.validate_image_properties(task.context, d_info,
                                                props)
-        deploy_utils.validate_capabilities(task.node)
 
-    @task_manager.require_exclusive_lock
-    def deploy(self, task):
-        """Start deployment of the task's node.
+    def prepare_ramdisk(self, task, ramdisk_params):
+        """Prepares the deploy ramdisk using virtual media.
 
-        Fetches the instance image, prepares the options for the deployment
-        ramdisk, sets the node to boot from virtual media cdrom, and reboots
-        the given node.
+        Prepares the options for the deployment ramdisk, sets the node to boot
+        from virtual media cdrom.
 
         :param task: a TaskManager instance containing the node to act on.
-        :returns: deploy state DEPLOYWAIT.
-        :raises: InstanceDeployFailure, if image size if greater than root
-            partition.
+        :param ramdisk_params: the options to be passed to the deploy ramdisk.
+        :raises: ImageRefValidationFailed if no image service can handle
+                 specified href.
         :raises: ImageCreationFailed, if it failed while creating the floppy
-            image.
+                 image.
+        :raises: InvalidParameterValue if the validation of the
+                 PowerInterface or ManagementInterface fails.
         :raises: IRMCOperationError, if some operation on iRMC fails.
         """
-        node = task.node
-        manager_utils.node_power_action(task, states.POWER_OFF)
 
-        iscsi_deploy.cache_instance_image(task.context, node)
-        iscsi_deploy.check_image_size(task)
-
-        deploy_ramdisk_opts = iscsi_deploy.build_deploy_ramdisk_options(node)
-        agent_opts = deploy_utils.build_agent_options(node)
-        deploy_ramdisk_opts.update(agent_opts)
         deploy_nic_mac = deploy_utils.get_single_nic_with_vif_port_id(task)
-        deploy_ramdisk_opts['BOOTIF'] = deploy_nic_mac
+        ramdisk_params['BOOTIF'] = deploy_nic_mac
 
-        _reboot_into_deploy_iso(task, deploy_ramdisk_opts)
+        _setup_deploy_iso(task, ramdisk_params)
 
-        return states.DEPLOYWAIT
+    def clean_up_ramdisk(self, task):
+        """Cleans up the boot of ironic ramdisk.
 
-    @task_manager.require_exclusive_lock
-    def tear_down(self, task):
-        """Tear down a previous deployment on the task's node.
+        This method cleans up the environment that was setup for booting the
+        deploy ramdisk.
 
-        Power off the node. All actual clean-up is done in the clean_up()
-        method which should be called separately.
+        :param task: a task from TaskManager.
+        :returns: None
+        :raises: IRMCOperationError if iRMC operation failed.
+        """
+        _cleanup_vmedia_boot(task)
 
-        :param task: a TaskManager instance containing the node to act on.
-        :returns: deploy state DELETED.
+    def prepare_instance(self, task):
+        """Prepares the boot of instance.
+
+        This method prepares the boot of the instance after reading
+        relevant information from the node's database.
+
+        :param task: a task from TaskManager.
+        :returns: None
+        """
+        _cleanup_vmedia_boot(task)
+
+        node = task.node
+        iwdi = node.driver_internal_info.get('is_whole_disk_image')
+        if deploy_utils.get_boot_option(node) == "local" or iwdi:
+            manager_utils.node_set_boot_device(task, boot_devices.DISK,
+                                               persistent=True)
+        else:
+            driver_internal_info = node.driver_internal_info
+            root_uuid_or_disk_id = driver_internal_info['root_uuid_or_disk_id']
+            self._configure_vmedia_boot(task, root_uuid_or_disk_id)
+
+    def clean_up_instance(self, task):
+        """Cleans up the boot of instance.
+
+        This method cleans up the environment that was setup for booting
+        the instance.
+
+        :param task: a task from TaskManager.
+        :returns: None
+        :raises: IRMCOperationError if iRMC operation failed.
         """
         _remove_share_file(_get_boot_iso_name(task.node))
         driver_internal_info = task.node.driver_internal_info
         driver_internal_info.pop('irmc_boot_iso', None)
         task.node.driver_internal_info = driver_internal_info
         task.node.save()
-        manager_utils.node_power_action(task, states.POWER_OFF)
-        return states.DELETED
-
-    def prepare(self, task):
-        """Prepare the deployment environment for the task's node.
-
-        If preparation of the deployment environment ahead of time is possible,
-        this method should be implemented by the driver.
-
-        If implemented, this method must be idempotent. It may be called
-        multiple times for the same node on the same conductor, and it may be
-        called by multiple conductors in parallel. Therefore, it must not
-        require an exclusive lock.
-
-        This method is called before `deploy`.
-
-        :param task: a TaskManager instance containing the node to act on.
-        """
-        pass
-
-    def clean_up(self, task):
-        """Clean up the deployment environment for the task's node.
-
-        Unlinks instance image and triggers image cache cleanup.
-
-        :param task: a TaskManager instance containing the node to act on.
-        """
         _cleanup_vmedia_boot(task)
-        iscsi_deploy.destroy_images(task.node.uuid)
-
-    def take_over(self, task):
-        pass
-
-
-class IRMCVirtualMediaAgentDeploy(base.DeployInterface):
-
-    def __init__(self):
-        """Constructor of IRMCVirtualMediaAgentDeploy.
-
-        :raises: IRMCSharedFileSystemNotMounted, if shared file system is
-            not mounted.
-        :raises: InvalidParameterValue, if config option has invalid value.
-        """
-        _check_share_fs_mounted()
-        super(IRMCVirtualMediaAgentDeploy, self).__init__()
-
-    """Interface for Agent deploy-related actions."""
-    def get_properties(self):
-        """Return the properties of the interface.
-
-        :returns: dictionary of <property name>:<property description> entries.
-        """
-        return COMMON_PROPERTIES
-
-    def validate(self, task):
-        """Validate the driver-specific Node deployment info.
-
-        :param task: a TaskManager instance
-        :raises: IRMCSharedFileSystemNotMounted, if shared file system is
-            not mounted.
-        :raises: InvalidParameterValue, if config option has invalid value.
-        :raises: MissingParameterValue if some parameters are missing.
-        """
-        _check_share_fs_mounted()
-        _parse_driver_info(task.node)
-        deploy_utils.validate_capabilities(task.node)
-
-    @task_manager.require_exclusive_lock
-    def deploy(self, task):
-        """Perform a deployment to a node.
-
-        Prepares the options for the agent ramdisk and sets the node to boot
-        from virtual media cdrom.
-
-        :param task: a TaskManager instance.
-        :returns: states.DEPLOYWAIT
-        :raises: ImageCreationFailed, if it failed while creating the floppy
-            image.
-        :raises: IRMCOperationError, if some operation on iRMC fails.
-        """
-        deploy_ramdisk_opts = deploy_utils.build_agent_options(task.node)
-        _reboot_into_deploy_iso(task, deploy_ramdisk_opts)
-
-        return states.DEPLOYWAIT
-
-    @task_manager.require_exclusive_lock
-    def tear_down(self, task):
-        """Tear down a previous deployment on the task's node.
-
-        :param task: a TaskManager instance.
-        :returns: states.DELETED
-        """
-        manager_utils.node_power_action(task, states.POWER_OFF)
-        return states.DELETED
-
-    def prepare(self, task):
-        """Prepare the deployment environment for this node.
-
-        :param task: a TaskManager instance.
-        """
-        node = task.node
-        node.instance_info = agent.build_instance_info_for_deploy(task)
-        node.save()
-
-    def clean_up(self, task):
-        """Clean up the deployment environment for this node.
-
-        Ejects the attached virtual media from the iRMC and also removes
-        the floppy image from the share file system, if it exists.
-
-        :param task: a TaskManager instance.
-        """
-        _cleanup_vmedia_boot(task)
-
-    def take_over(self, task):
-        """Take over management of this node from a dead conductor.
-
-        :param task: a TaskManager instance.
-        """
-        pass
-
-
-class VendorPassthru(agent_base_vendor.BaseAgentVendor):
-    """Vendor-specific interfaces for iRMC deploy drivers."""
-
-    def get_properties(self):
-        return COMMON_PROPERTIES
-
-    def validate(self, task, method, **kwargs):
-        """Validate vendor-specific actions.
-
-        Checks if a valid vendor passthru method was passed and validates
-        the parameters for the vendor passthru method.
-
-        :param task: a TaskManager instance containing the node to act on.
-        :param method: method to be validated.
-        :param kwargs: kwargs containing the vendor passthru method's
-            parameters.
-        :raises: MissingParameterValue, if some required parameters were not
-            passed.
-        :raises: InvalidParameterValue, if any of the parameters have invalid
-            value.
-        """
-        if method == 'pass_deploy_info':
-            iscsi_deploy.get_deploy_info(task.node, **kwargs)
-        elif method == 'pass_bootloader_install_info':
-            iscsi_deploy.validate_pass_bootloader_info_input(task, kwargs)
 
     def _configure_vmedia_boot(self, task, root_uuid_or_disk_id):
         """Configure vmedia boot for the node."""
         node = task.node
         _prepare_boot_iso(task, root_uuid_or_disk_id)
-        setup_vmedia_for_boot(
+        _setup_vmedia_for_boot(
             task, node.driver_internal_info['irmc_boot_iso'])
         manager_utils.node_set_boot_device(task, boot_devices.CDROM,
                                            persistent=True)
-
-    @base.passthru(['POST'])
-    @task_manager.require_exclusive_lock
-    def pass_bootloader_install_info(self, task, **kwargs):
-        """Accepts the results of bootloader installation.
-
-        This method acts as a vendor passthru and accepts the result of
-        bootloader installation. If the bootloader installation was
-        successful, then it notifies the baremetal to proceed to reboot
-        and makes the instance active. If bootloader installation failed,
-        then it sets provisioning as failed and powers off the node.
-
-        :param task: A TaskManager object.
-        :param kwargs: The arguments sent with vendor passthru.  The expected
-            kwargs are::
-
-                'key': The deploy key for authorization
-                'status': 'SUCCEEDED' or 'FAILED'
-                'error': The error message if status == 'FAILED'
-                'address': The IP address of the ramdisk
-        """
-        LOG.warning(_LW("The node %s is using the bash deploy ramdisk for "
-                        "its deployment. This deploy ramdisk has been "
-                        "deprecated. Please use the ironic-python-agent "
-                        "(IPA) ramdisk instead."), task.node.uuid)
-        task.process_event('resume')
-        iscsi_deploy.validate_bootloader_install_status(task, kwargs)
-        iscsi_deploy.finish_deploy(task, kwargs['address'])
-
-    @base.passthru(['POST'])
-    @task_manager.require_exclusive_lock
-    def pass_deploy_info(self, task, **kwargs):
-        """Continues the iSCSI deployment from where ramdisk left off.
-
-        This method continues the iSCSI deployment from the conductor node
-        and writes the deploy image to the bare metal's disk.  After that,
-        it does the following depending on boot_option for deploy:
-
-        - If the boot_option requested for this deploy is 'local', then it
-          sets the node to boot from disk (ramdisk installs the boot loader
-          present within the image to the bare metal's disk).
-        - If the boot_option requested is 'netboot' or no boot_option is
-          requested, it finds/creates the boot ISO to boot the instance
-          image, attaches the boot ISO to the bare metal and then sets
-          the node to boot from CDROM.
-
-        :param task: a TaskManager instance containing the node to act on.
-        :param kwargs: kwargs containing parameters for iSCSI deployment.
-        :raises: InvalidState
-        """
-        node = task.node
-        LOG.warning(_LW("The node %s is using the bash deploy ramdisk for "
-                        "its deployment. This deploy ramdisk has been "
-                        "deprecated. Please use the ironic-python-agent "
-                        "(IPA) ramdisk instead."), node.uuid)
-        task.process_event('resume')
-
-        LOG.debug('Continuing iSCSI virtual media deployment on node %s',
-                  node.uuid)
-
-        is_whole_disk_image = node.driver_internal_info.get(
-            'is_whole_disk_image')
-        uuid_dict = iscsi_deploy.continue_deploy(task, **kwargs)
-        root_uuid_or_disk_id = uuid_dict.get(
-            'root uuid', uuid_dict.get('disk identifier'))
-
-        try:
-            _cleanup_vmedia_boot(task)
-            if (deploy_utils.get_boot_option(node) == "local" or
-                is_whole_disk_image):
-                manager_utils.node_set_boot_device(task, boot_devices.DISK,
-                                                   persistent=True)
-
-                # Ask the ramdisk to install bootloader and
-                # wait for the call-back through the vendor passthru
-                # 'pass_bootloader_install_info', if it's not a whole
-                # disk image.
-                if not is_whole_disk_image:
-                    deploy_utils.notify_ramdisk_to_proceed(kwargs['address'])
-                    task.process_event('wait')
-                    return
-
-            else:
-                self._configure_vmedia_boot(task, root_uuid_or_disk_id)
-
-        except Exception as e:
-            LOG.exception(_LE('Deploy failed for instance %(instance)s. '
-                              'Error: %(error)s'),
-                          {'instance': node.instance_uuid, 'error': e})
-            msg = _('Failed to continue iSCSI deployment.')
-            deploy_utils.set_failed_state(task, msg)
-        else:
-            iscsi_deploy.finish_deploy(task, kwargs.get('address'))
-
-    @task_manager.require_exclusive_lock
-    def continue_deploy(self, task, **kwargs):
-        """Method invoked when deployed with the IPA ramdisk.
-
-        This method is invoked during a heartbeat from an agent when
-        the node is in wait-call-back state. This deploys the image on
-        the node and then configures the node to boot according to the
-        desired boot option (netboot or localboot).
-
-        :param task: a TaskManager object containing the node.
-        :param kwargs: the kwargs passed from the heartbeat method.
-        :raises: InstanceDeployFailure, if it encounters some error during
-            the deploy.
-        """
-        node = task.node
-        task.process_event('resume')
-
-        LOG.debug('Continuing IPA deployment on node %s', node.uuid)
-
-        is_whole_disk_image = node.driver_internal_info.get(
-            'is_whole_disk_image')
-        _cleanup_vmedia_boot(task)
-        uuid_dict = iscsi_deploy.do_agent_iscsi_deploy(task, self._client)
-        root_uuid = uuid_dict.get('root uuid')
-
-        if (deploy_utils.get_boot_option(node) == "local" or
-            is_whole_disk_image):
-            efi_system_part_uuid = uuid_dict.get(
-                'efi system partition uuid')
-            self.configure_local_boot(
-                task, root_uuid=root_uuid,
-                efi_system_part_uuid=efi_system_part_uuid)
-        else:
-            self._configure_vmedia_boot(task, root_uuid)
-
-        self.reboot_and_finish_deploy(task)
-
-
-class IRMCVirtualMediaAgentVendorInterface(agent.AgentVendorInterface):
-    """Interface for vendor passthru related actions."""
-
-    def reboot_to_instance(self, task, **kwargs):
-        node = task.node
-        LOG.debug('Preparing to reboot to instance for node %s',
-                  node.uuid)
-
-        _cleanup_vmedia_boot(task)
-
-        super(IRMCVirtualMediaAgentVendorInterface,
-              self).reboot_to_instance(task, **kwargs)
