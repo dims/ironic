@@ -1909,7 +1909,7 @@ class MiscTestCase(mgr_utils.ServiceSetUpMixin, mgr_utils.CommonMixIn,
     def test_get_driver_known(self):
         self._start_service()
         driver = self.service._get_driver('fake')
-        self.assertTrue(isinstance(driver, drivers_base.BaseDriver))
+        self.assertIsInstance(driver, drivers_base.BaseDriver)
 
     def test_get_driver_unknown(self):
         self._start_service()
@@ -3326,7 +3326,7 @@ class ManagerTestProperties(tests_db_base.DbTestCase):
     def test_driver_properties_fake_ssh(self):
         expected = ['ssh_address', 'ssh_username', 'ssh_virt_type',
                     'ssh_key_contents', 'ssh_key_filename',
-                    'ssh_password', 'ssh_port']
+                    'ssh_password', 'ssh_port', 'ssh_terminal_port']
         self._check_driver_properties("fake_ssh", expected)
 
     def test_driver_properties_fake_pxe(self):
@@ -3365,7 +3365,7 @@ class ManagerTestProperties(tests_db_base.DbTestCase):
         expected = ['deploy_kernel', 'deploy_ramdisk',
                     'ssh_address', 'ssh_username', 'ssh_virt_type',
                     'ssh_key_contents', 'ssh_key_filename',
-                    'ssh_password', 'ssh_port']
+                    'ssh_password', 'ssh_port', 'ssh_terminal_port']
         self._check_driver_properties("pxe_ssh", expected)
 
     def test_driver_properties_pxe_seamicro(self):
