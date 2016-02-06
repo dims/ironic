@@ -33,11 +33,6 @@ class PXEDracDriver(base.BaseDriver):
     """Drac driver using PXE for deploy."""
 
     def __init__(self):
-        if not importutils.try_import('pywsman'):
-            raise exception.DriverLoadError(
-                driver=self.__class__.__name__,
-                reason=_('Unable to import pywsman library'))
-
         if not importutils.try_import('dracclient'):
             raise exception.DriverLoadError(
                 driver=self.__class__.__name__,
@@ -57,6 +52,8 @@ class PXEDracDriver(base.BaseDriver):
                         'commit_bios_config': self.drac_vendor,
                         'abandon_bios_config': self.drac_vendor,
                         }
-        self.vendor = utils.MixinVendorInterface(self.mapping)
+        self.driver_passthru_mapping = {'lookup': self.iscsi_vendor}
+        self.vendor = utils.MixinVendorInterface(self.mapping,
+                                                 self.driver_passthru_mapping)
         self.inspect = inspector.Inspector.create_if_enabled(
             'PXEDracDriver')

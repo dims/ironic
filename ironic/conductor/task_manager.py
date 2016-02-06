@@ -204,7 +204,10 @@ class TaskManager(object):
             else:
                 self._debug_timer.restart()
                 self.node = objects.Node.get(context, node_id)
+
             self.ports = objects.Port.list_by_node_id(context, self.node.id)
+            self.portgroups = objects.Portgroup.list_by_node_id(context,
+                                                                self.node.id)
             self.driver = driver_factory.get_driver(driver_name or
                                                     self.node.driver)
 
@@ -236,7 +239,7 @@ class TaskManager(object):
                                              self.node_id)
             LOG.debug("Node %(node)s successfully reserved for %(purpose)s "
                       "(took %(time).2f seconds)",
-                      {'node': self.node_id, 'purpose': self._purpose,
+                      {'node': self.node.uuid, 'purpose': self._purpose,
                        'time': self._debug_timer.elapsed()})
             self._debug_timer.restart()
 
@@ -313,6 +316,7 @@ class TaskManager(object):
         self.node = None
         self.driver = None
         self.ports = None
+        self.portgroups = None
         self.fsm = None
 
     def _thread_release_resources(self, t):
