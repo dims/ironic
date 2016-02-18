@@ -661,6 +661,12 @@ class ServiceDoNodeDeployTestCase(mgr_utils.ServiceSetUpMixin,
                                 self.context, node.uuid)
         # Compare true exception hidden by @messaging.expected_exceptions
         self.assertEqual(exception.InstanceDeployFailure, exc.exc_info[0])
+        # Check the message of InstanceDeployFailure. In a
+        # messaging.rpc.ExpectedException sys.exc_info() is stored in exc_info
+        # in the exception object. So InstanceDeployFailure will be in
+        # exc_info[1]
+        self.assertIn(r'node 1be26c0b-03f2-4d2e-ae87-c02d7f33c123',
+                      str(exc.exc_info[1]))
         # This is a sync operation last_error should be None.
         self.assertIsNone(node.last_error)
         # Verify reservation has been cleared.
@@ -1360,7 +1366,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
                           tests_db_base.DbTestCase):
     def setUp(self):
         super(DoNodeCleanTestCase, self).setUp()
-        self.config(clean_nodes=True, group='conductor')
+        self.config(automated_clean=True, group='conductor')
         self.power_update = {
             'step': 'update_firmware', 'priority': 10, 'interface': 'power'}
         self.deploy_update = {
@@ -1370,7 +1376,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         # Automated cleaning should be executed in this order
         self.clean_steps = [self.deploy_erase, self.power_update,
                             self.deploy_update]
-        self.next_clean_steps = self.clean_steps[1:]
+        self.next_clean_step_index = 1
         # Manual clean step
         self.deploy_raid = {
             'step': 'build_raid', 'priority': 0, 'interface': 'deploy'}
@@ -1532,7 +1538,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(states.CLEANING, node.provision_state)
         self.assertEqual(tgt_prv_state, node.target_provision_state)
         mock_spawn.assert_called_with(self.service._do_next_clean_step,
-                                      mock.ANY, self.next_clean_steps)
+                                      mock.ANY, self.next_clean_step_index)
 
     def test_continue_node_clean_automated(self):
         self._continue_node_clean(states.CLEANWAIT)
@@ -1558,13 +1564,13 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.service._worker_pool.waitall()
         node.refresh()
         if skip:
-            expected_steps = self.next_clean_steps
+            expected_step_index = 1
         else:
             self.assertFalse(
                 'skip_current_clean_step' in node.driver_internal_info)
-            expected_steps = self.clean_steps
+            expected_step_index = 0
         mock_spawn.assert_called_with(self.service._do_next_clean_step,
-                                      mock.ANY, expected_steps)
+                                      mock.ANY, expected_step_index)
 
     def test_continue_node_clean_skip_step(self):
         self._continue_node_clean_skip_step()
@@ -1603,7 +1609,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         last_clean_step = self.clean_steps[0]
         last_clean_step['abortable'] = False
         last_clean_step['abort_after'] = True
-        driver_info = {'clean_steps': [self.clean_steps[0]]}
+        driver_info = {'clean_steps': [self.clean_steps[0]],
+                       'clean_step_index': 0}
         tgt_prov_state = states.MANAGEABLE if manual else states.AVAILABLE
         node = obj_utils.create_test_node(
             self.context, driver='fake', provision_state=states.CLEANWAIT,
@@ -1627,7 +1634,6 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
     @mock.patch('ironic.drivers.modules.fake.FakePower.validate')
     def __do_node_clean_validate_fail(self, mock_validate, clean_steps=None):
         # InvalidParameterValue should be cause node to go to CLEANFAIL
-        self.config(clean_nodes=True, group='conductor')
         mock_validate.side_effect = exception.InvalidParameterValue('error')
         tgt_prov_state = states.MANAGEABLE if clean_steps else states.AVAILABLE
         node = obj_utils.create_test_node(
@@ -1650,7 +1656,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
     @mock.patch('ironic.drivers.modules.fake.FakePower.validate')
     def test__do_node_clean_automated_disabled(self, mock_validate):
-        self.config(clean_nodes=False, group='conductor')
+        self.config(automated_clean=False, group='conductor')
         node = obj_utils.create_test_node(
             self.context, driver='fake',
             provision_state=states.CLEANING,
@@ -1670,12 +1676,12 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(states.NOSTATE, node.target_provision_state)
         self.assertEqual({}, node.clean_step)
         self.assertIsNone(node.driver_internal_info.get('clean_steps'))
+        self.assertIsNone(node.driver_internal_info.get('clean_step_index'))
 
     @mock.patch('ironic.drivers.modules.fake.FakeDeploy.prepare_cleaning')
     def __do_node_clean_prepare_clean_fail(self, mock_prep, clean_steps=None):
         # Exception from task.driver.deploy.prepare_cleaning should cause node
         # to go to CLEANFAIL
-        self.config(clean_nodes=True, group='conductor')
         mock_prep.side_effect = exception.InvalidParameterValue('error')
         tgt_prov_state = states.MANAGEABLE if clean_steps else states.AVAILABLE
         node = obj_utils.create_test_node(
@@ -1698,7 +1704,6 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
     @mock.patch('ironic.drivers.modules.fake.FakeDeploy.prepare_cleaning')
     def __do_node_clean_prepare_clean_wait(self, mock_prep, clean_steps=None):
-        self.config(clean_nodes=True, group='conductor')
         mock_prep.return_value = states.CLEANWAIT
         tgt_prov_state = states.MANAGEABLE if clean_steps else states.AVAILABLE
         node = obj_utils.create_test_node(
@@ -1722,7 +1727,6 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
     @mock.patch.object(conductor_utils, 'set_node_cleaning_steps')
     def __do_node_clean_steps_fail(self, mock_steps, clean_steps=None,
                                    invalid_exc=True):
-        self.config(clean_nodes=True, group='conductor')
         if invalid_exc:
             mock_steps.side_effect = exception.InvalidParameterValue('invalid')
         else:
@@ -1756,18 +1760,19 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
     @mock.patch('ironic.drivers.modules.fake.FakePower.validate')
     def __do_node_clean(self, mock_validate, mock_next_step, mock_steps,
                         clean_steps=None):
-        if clean_steps is None:
-            clean_steps = []
-        tgt_prov_state = states.MANAGEABLE if clean_steps else states.AVAILABLE
+        if clean_steps:
+            tgt_prov_state = states.MANAGEABLE
+            driver_info = {}
+        else:
+            tgt_prov_state = states.AVAILABLE
+            driver_info = {'clean_steps': self.clean_steps}
         node = obj_utils.create_test_node(
             self.context, driver='fake',
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
             power_state=states.POWER_OFF,
-            driver_internal_info={'clean_steps': clean_steps})
-
-        mock_steps.return_value = self.clean_steps
+            driver_internal_info=driver_info)
 
         self._start_service()
         with task_manager.acquire(
@@ -1778,8 +1783,11 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         node.refresh()
 
         mock_validate.assert_called_once_with(task)
-        mock_next_step.assert_called_once_with(mock.ANY, clean_steps)
+        mock_next_step.assert_called_once_with(mock.ANY, 0)
         mock_steps.assert_called_once_with(task)
+        if clean_steps:
+            self.assertEqual(clean_steps,
+                             node.driver_internal_info['clean_steps'])
 
         # Check that state didn't change
         self.assertEqual(states.CLEANING, node.provision_state)
@@ -1795,28 +1803,38 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
     def _do_next_clean_step_first_step_async(self, return_state, mock_execute,
                                              clean_steps=None):
         # Execute the first async clean step on a node
-        tgt_prov_state = states.MANAGEABLE if clean_steps else states.AVAILABLE
+        driver_internal_info = {'clean_step_index': None}
+        if clean_steps:
+            tgt_prov_state = states.MANAGEABLE
+            driver_internal_info['clean_steps'] = clean_steps
+        else:
+            tgt_prov_state = states.AVAILABLE
+            driver_internal_info['clean_steps'] = self.clean_steps
+
         node = obj_utils.create_test_node(
             self.context, driver='fake',
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info=driver_internal_info,
             clean_step={})
         mock_execute.return_value = return_state
+        expected_first_step = node.driver_internal_info['clean_steps'][0]
 
         self._start_service()
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, self.clean_steps)
+            self.service._do_next_clean_step(task, 0)
 
         self.service._worker_pool.waitall()
         node.refresh()
 
         self.assertEqual(states.CLEANWAIT, node.provision_state)
         self.assertEqual(tgt_prov_state, node.target_provision_state)
-        self.assertEqual(self.clean_steps[0], node.clean_step)
-        mock_execute.assert_called_once_with(mock.ANY, self.clean_steps[0])
+        self.assertEqual(expected_first_step, node.clean_step)
+        self.assertEqual(0, node.driver_internal_info['clean_step_index'])
+        mock_execute.assert_called_once_with(mock.ANY, expected_first_step)
 
     def test_do_next_clean_step_automated_first_step_async(self):
         self._do_next_clean_step_first_step_async(states.CLEANWAIT)
@@ -1839,6 +1857,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info={'clean_steps': self.clean_steps,
+                                  'clean_step_index': 0},
             clean_step=self.clean_steps[0])
         mock_execute.return_value = return_state
 
@@ -1846,7 +1866,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, self.next_clean_steps)
+            self.service._do_next_clean_step(task, self.next_clean_step_index)
 
         self.service._worker_pool.waitall()
         node.refresh()
@@ -1854,6 +1874,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(states.CLEANWAIT, node.provision_state)
         self.assertEqual(tgt_prov_state, node.target_provision_state)
         self.assertEqual(self.clean_steps[1], node.clean_step)
+        self.assertEqual(1, node.driver_internal_info['clean_step_index'])
         mock_execute.assert_called_once_with(mock.ANY, self.clean_steps[1])
 
     def test_do_next_clean_step_continue_from_last_cleaning(self):
@@ -1870,18 +1891,21 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
     def _do_next_clean_step_last_step_noop(self, mock_execute, manual=False):
         # Resume where last_step is the last cleaning step, should be noop
         tgt_prov_state = states.MANAGEABLE if manual else states.AVAILABLE
+        info = {'clean_steps': self.clean_steps,
+                'clean_step_index': len(self.clean_steps) - 1}
         node = obj_utils.create_test_node(
             self.context, driver='fake',
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info=info,
             clean_step=self.clean_steps[-1])
 
         self._start_service()
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, [])
+            self.service._do_next_clean_step(task, None)
 
         self.service._worker_pool.waitall()
         node.refresh()
@@ -1890,6 +1914,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(tgt_prov_state, node.provision_state)
         self.assertEqual(states.NOSTATE, node.target_provision_state)
         self.assertEqual({}, node.clean_step)
+        self.assertFalse('clean_step_index' in node.driver_internal_info)
+        self.assertEqual(None, node.driver_internal_info['clean_steps'])
         self.assertFalse(mock_execute.called)
 
     def test__do_next_clean_step_automated_last_step_noop(self):
@@ -1909,6 +1935,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info={'clean_steps': self.clean_steps,
+                                  'clean_step_index': None},
             clean_step={})
         mock_deploy_execute.return_value = None
         mock_power_execute.return_value = None
@@ -1917,7 +1945,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, self.clean_steps)
+            self.service._do_next_clean_step(task, 0)
 
         self.service._worker_pool.waitall()
         node.refresh()
@@ -1926,6 +1954,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(tgt_prov_state, node.provision_state)
         self.assertEqual(states.NOSTATE, node.target_provision_state)
         self.assertEqual({}, node.clean_step)
+        self.assertFalse('clean_step_index' in node.driver_internal_info)
+        self.assertEqual(None, node.driver_internal_info['clean_steps'])
         mock_power_execute.assert_called_once_with(mock.ANY,
                                                    self.clean_steps[1])
         mock_deploy_execute.assert_has_calls = [
@@ -1950,6 +1980,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info={'clean_steps': self.clean_steps,
+                                  'clean_step_index': None},
             clean_step={})
         mock_execute.side_effect = Exception()
 
@@ -1957,7 +1989,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, self.clean_steps)
+            self.service._do_next_clean_step(task, 0)
             tear_mock.assert_called_once_with(task.driver.deploy, task)
 
         self.service._worker_pool.waitall()
@@ -1967,6 +1999,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(states.CLEANFAIL, node.provision_state)
         self.assertEqual(tgt_prov_state, node.target_provision_state)
         self.assertEqual({}, node.clean_step)
+        self.assertFalse('clean_step_index' in node.driver_internal_info)
         self.assertIsNotNone(node.last_error)
         self.assertTrue(node.maintenance)
         mock_execute.assert_called_once_with(mock.ANY, self.clean_steps[0])
@@ -1988,6 +2021,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info={'clean_steps': self.clean_steps,
+                                  'clean_step_index': None},
             clean_step={})
 
         mock_execute.return_value = None
@@ -1997,7 +2032,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, self.clean_steps)
+            self.service._do_next_clean_step(task, 0)
 
         self.service._worker_pool.waitall()
         node.refresh()
@@ -2006,6 +2041,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(states.CLEANFAIL, node.provision_state)
         self.assertEqual(tgt_prov_state, node.target_provision_state)
         self.assertEqual({}, node.clean_step)
+        self.assertFalse('clean_step_index' in node.driver_internal_info)
         self.assertIsNotNone(node.last_error)
         self.assertEqual(1, tear_mock.call_count)
         self.assertTrue(node.maintenance)
@@ -2019,30 +2055,36 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
     @mock.patch('ironic.drivers.modules.fake.FakeDeploy.execute_clean_step')
     def _do_next_clean_step_no_steps(self, mock_execute, manual=False):
-        # Resume where there are no steps, should be a noop
-        tgt_prov_state = states.MANAGEABLE if manual else states.AVAILABLE
-        node = obj_utils.create_test_node(
-            self.context, driver='fake',
-            provision_state=states.CLEANING,
-            target_provision_state=tgt_prov_state,
-            last_error=None,
-            clean_step={})
 
-        self._start_service()
+        for info in ({'clean_steps': None, 'clean_step_index': None},
+                     {'clean_steps': None}):
+            # Resume where there are no steps, should be a noop
+            tgt_prov_state = states.MANAGEABLE if manual else states.AVAILABLE
+            node = obj_utils.create_test_node(
+                self.context, driver='fake',
+                uuid=uuidutils.generate_uuid(),
+                provision_state=states.CLEANING,
+                target_provision_state=tgt_prov_state,
+                last_error=None,
+                driver_internal_info=info,
+                clean_step={})
 
-        with task_manager.acquire(
-                self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(
-                task, [])
+            self._start_service()
 
-        self.service._worker_pool.waitall()
-        node.refresh()
+            with task_manager.acquire(
+                    self.context, node.uuid, shared=False) as task:
+                self.service._do_next_clean_step(task, None)
 
-        # Cleaning should be complete without calling additional steps
-        self.assertEqual(tgt_prov_state, node.provision_state)
-        self.assertEqual(states.NOSTATE, node.target_provision_state)
-        self.assertEqual({}, node.clean_step)
-        self.assertFalse(mock_execute.called)
+            self.service._worker_pool.waitall()
+            node.refresh()
+
+            # Cleaning should be complete without calling additional steps
+            self.assertEqual(tgt_prov_state, node.provision_state)
+            self.assertEqual(states.NOSTATE, node.target_provision_state)
+            self.assertEqual({}, node.clean_step)
+            self.assertFalse('clean_step_index' in node.driver_internal_info)
+            self.assertFalse(mock_execute.called)
+            mock_execute.reset_mock()
 
     def test__do_next_clean_step_automated_no_steps(self):
         self._do_next_clean_step_no_steps()
@@ -2061,6 +2103,8 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
             provision_state=states.CLEANING,
             target_provision_state=tgt_prov_state,
             last_error=None,
+            driver_internal_info={'clean_steps': self.clean_steps,
+                                  'clean_step_index': None},
             clean_step={})
         deploy_exec_mock.return_value = "foo"
 
@@ -2068,7 +2112,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
 
         with task_manager.acquire(
                 self.context, node.uuid, shared=False) as task:
-            self.service._do_next_clean_step(task, self.clean_steps)
+            self.service._do_next_clean_step(task, 0)
 
         self.service._worker_pool.waitall()
         node.refresh()
@@ -2077,6 +2121,7 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self.assertEqual(states.CLEANFAIL, node.provision_state)
         self.assertEqual(tgt_prov_state, node.target_provision_state)
         self.assertEqual({}, node.clean_step)
+        self.assertFalse('clean_step_index' in node.driver_internal_info)
         self.assertIsNotNone(node.last_error)
         self.assertTrue(node.maintenance)
         deploy_exec_mock.assert_called_once_with(mock.ANY,
@@ -2091,6 +2136,44 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
         self._do_next_clean_step_bad_step_return_value(manual=True)
 
     def __get_node_next_clean_steps(self, skip=True):
+        driver_internal_info = {'clean_steps': self.clean_steps,
+                                'clean_step_index': 0}
+        node = obj_utils.create_test_node(
+            self.context, driver='fake',
+            provision_state=states.CLEANWAIT,
+            target_provision_state=states.AVAILABLE,
+            driver_internal_info=driver_internal_info,
+            last_error=None,
+            clean_step=self.clean_steps[0])
+
+        with task_manager.acquire(self.context, node.uuid) as task:
+            step_index = self.service._get_node_next_clean_steps(
+                task, skip_current_step=skip)
+            expected_index = 1 if skip else 0
+            self.assertEqual(expected_index, step_index)
+
+    def test__get_node_next_clean_steps(self):
+        self.__get_node_next_clean_steps()
+
+    def test__get_node_next_clean_steps_no_skip(self):
+        self.__get_node_next_clean_steps(skip=False)
+
+    def test__get_node_next_clean_steps_unset_clean_step(self):
+        driver_internal_info = {'clean_steps': self.clean_steps,
+                                'clean_step_index': None}
+        node = obj_utils.create_test_node(
+            self.context, driver='fake',
+            provision_state=states.CLEANWAIT,
+            target_provision_state=states.AVAILABLE,
+            driver_internal_info=driver_internal_info,
+            last_error=None,
+            clean_step=None)
+
+        with task_manager.acquire(self.context, node.uuid) as task:
+            step_index = self.service._get_node_next_clean_steps(task)
+            self.assertEqual(0, step_index)
+
+    def __get_node_next_clean_steps_backwards_compat(self, skip=True):
         driver_internal_info = {'clean_steps': self.clean_steps}
         node = obj_utils.create_test_node(
             self.context, driver='fake',
@@ -2101,32 +2184,19 @@ class DoNodeCleanTestCase(mgr_utils.ServiceSetUpMixin,
             clean_step=self.clean_steps[0])
 
         with task_manager.acquire(self.context, node.uuid) as task:
-            steps = self.service._get_node_next_clean_steps(
+            step_index = self.service._get_node_next_clean_steps(
                 task, skip_current_step=skip)
-            expected = self.next_clean_steps if skip else self.clean_steps
-            self.assertEqual(expected, steps)
+            expected_index = 1 if skip else 0
+            self.assertEqual(expected_index, step_index)
 
-    def test__get_node_next_clean_steps(self):
-        self.__get_node_next_clean_steps()
+    def test__get_node_next_clean_steps_backwards_compat(self):
+        self.__get_node_next_clean_steps_backwards_compat()
 
-    def test__get_node_next_clean_steps_no_skip(self):
-        self.__get_node_next_clean_steps(skip=False)
-
-    def test__get_node_next_clean_steps_unset_clean_step(self):
-        driver_internal_info = {'clean_steps': self.clean_steps}
-        node = obj_utils.create_test_node(
-            self.context, driver='fake',
-            provision_state=states.CLEANWAIT,
-            target_provision_state=states.AVAILABLE,
-            driver_internal_info=driver_internal_info,
-            last_error=None,
-            clean_step=None)
-
-        with task_manager.acquire(self.context, node.uuid) as task:
-            steps = self.service._get_node_next_clean_steps(task)
-            self.assertEqual(self.clean_steps, steps)
+    def test__get_node_next_clean_steps_no_skip_backwards_compat(self):
+        self.__get_node_next_clean_steps_backwards_compat(skip=False)
 
     def test__get_node_next_clean_steps_bad_clean_step(self):
+        # NOTE(rloo) for backwards compatibility
         driver_internal_info = {'clean_steps': self.clean_steps}
         node = obj_utils.create_test_node(
             self.context, driver='fake',
